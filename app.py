@@ -1,7 +1,10 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import json, os
 
 app = Flask(__name__)
+CORS(app, origins=["https://web-os-frontend.netlify.app"])  # allow only your frontend
+
 DATA_FILE = 'users.json'
 
 if not os.path.exists(DATA_FILE):
