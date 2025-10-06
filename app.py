@@ -1,43 +1,63 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
-import json, os
+from deta import Deta  # Deta Base
+import os
 
 app = Flask(__name__)
-CORS(app, origins=["https://web-os-frontend.netlify.app"])  # allow only your frontend
 
-DATA_FILE = 'users.json'
+# Initialize Deta Base
+# If deploying via Deta Space web UI, you can leave the key blank
+deta = Deta(os.environ.get("DETA_PROJECT_KEY"))  # Deta will auto-set key in Space
+db = deta.Base("users")  # replaces users.json
 
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE,'w') as f:
-        json.dump({"Admin":{"password":"Root"}}, f)
+# -----------------------
+# Helper functions
+# -----------------------
+def get_user(username):
+    return db.get(username)
 
-def read_users():
-    with open(DATA_FILE,'r') as f: return json.load(f)
-def write_users(users):
-    with open(DATA_FILE,'w') as f: json.dump(users,f)
+def put_user(username, password, group="Normal"):
+    db.put({"key": username, "password": password, "group": group})
 
+# -----------------------
+# API Endpoints
+# -----------------------
+
+# Login endpoint
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    u, p = data.get('username'), data.get('password')
-    users = read_users()
-    return jsonify({"success": u in users and users[u]["password"]==p})
+    username, password = data.get("username"), data.get("password")
+    user = get_user(username)
+    if user and user["password"] == password:
+        return jsonify({"success": True})
+    return jsonify({"success": False})
 
-@app.route('/api/users', methods=['GET','POST'])
-def users_api():
-    users = read_users()
-    if request.method=='GET': return jsonify(users)
-    d=request.json; users[d['username']]={"password":d['password'],"group":d.get("group","Normal")}
-    write_users(users); return jsonify({"success":True})
+# Add / Update user endpoint
+@app.route('/api/users', methods=['POST'])
+def add_user():
+    data = request.json
+    put_user(data['username'], data['password'], data.get("group", "Normal"))
+    return jsonify({"success": True})
 
+# Change password endpoint
 @app.route('/api/users/password', methods=['PUT'])
 def change_password():
     data = request.json
-    users = read_users()
-    if data['username'] in users:
-        users[data['username']]['password']=data['password']; write_users(users)
-        return jsonify({"success":True})
-    return jsonify({"success":False})
+    user = get_user(data['username'])
+    if user:
+        put_user(data['username'], data['password'], user.get("group", "Normal"))
+        return jsonify({"success": True})
+    return jsonify({"success": False})
 
-if __name__=='__main__':
+# List all users (for admin/testing)
+@app.route('/api/users', methods=['GET'])
+def list_users():
+    all_users = db.fetch().items  # fetch returns dict with items list
+    users_sanitized = {u["key"]: {"group": u.get("group", "Normal")} for u in all_users}
+    return jsonify(users_sanitized)
+
+# -----------------------
+# Run server
+# -----------------------
+if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5500)
