@@ -1,28 +1,47 @@
 from flask import Flask, request, jsonify
-from deta import Deta  # Deta Base
 import os
+import json
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)  # allow Netlify frontend to call API
 
-# Initialize Deta Base
-# If deploying via Deta Space web UI, you can leave the key blank
-deta = Deta(os.environ.get("DETA_PROJECT_KEY"))  # Deta will auto-set key in Space
-db = deta.Base("users")  # replaces users.json
+# Path to your JSON file
+DATA_FILE = "users.json"
 
 # -----------------------
 # Helper functions
 # -----------------------
+def load_users():
+    if not os.path.exists(DATA_FILE):
+        return {}
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(users):
+    with open(DATA_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
 def get_user(username):
-    return db.get(username)
+    users = load_users()
+    return users.get(username)
 
 def put_user(username, password, group="Normal"):
-    db.put({"key": username, "password": password, "group": group})
+    users = load_users()
+    users[username] = {"password": password, "group": group}
+    save_users(users)
+
+def remove_user(username):
+    users = load_users()
+    if username in users:
+        del users[username]
+        save_users(users)
+        return True
+    return False
 
 # -----------------------
 # API Endpoints
 # -----------------------
-
-# Login endpoint
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
@@ -32,14 +51,12 @@ def login():
         return jsonify({"success": True})
     return jsonify({"success": False})
 
-# Add / Update user endpoint
 @app.route('/api/users', methods=['POST'])
 def add_user():
     data = request.json
     put_user(data['username'], data['password'], data.get("group", "Normal"))
     return jsonify({"success": True})
 
-# Change password endpoint
 @app.route('/api/users/password', methods=['PUT'])
 def change_password():
     data = request.json
@@ -49,15 +66,21 @@ def change_password():
         return jsonify({"success": True})
     return jsonify({"success": False})
 
-# List all users (for admin/testing)
 @app.route('/api/users', methods=['GET'])
 def list_users():
-    all_users = db.fetch().items  # fetch returns dict with items list
-    users_sanitized = {u["key"]: {"group": u.get("group", "Normal")} for u in all_users}
-    return jsonify(users_sanitized)
+    users = load_users()
+    sanitized = {k: {"group": v.get("group", "Normal")} for k, v in users.items()}
+    return jsonify(sanitized)
+
+@app.route('/api/users/remove', methods=['POST'])
+def remove_user_endpoint():
+    data = request.json
+    success = remove_user(data.get("username"))
+    return jsonify({"success": success})
 
 # -----------------------
 # Run server
 # -----------------------
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5500)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
